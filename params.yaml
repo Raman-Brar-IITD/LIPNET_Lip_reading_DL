@@ -1,0 +1,20 @@
+data:
+  url: 'https://drive.google.com/uc?id=1YlvpDLix3S-U8fd-gqRwPcWXAXm8JwjL'
+  zip_file: 'data.zip'
+  raw_dir: 'data/raw'
+  processed_dir: 'data/processed'
+  tfrecord_file: 'data/processed/lipread_data.tfrecord'
+
+train:
+  training: False
+  weight_url: "https://drive.google.com/uc?id=1iLrOT5D1TED4zCit6yuM1Rq37sybtX7g"
+  epochs: 20
+  batch_size: 2
+  learning_rate: 0.0001
+  checkpoint_path: 'models/lipread_model.weights.h5'
+
+model:
+  input_shape: [75, 46, 140, 1]
+  padded_shapes:
+    frames: [75, 46, 140, 1]
+    alignments: [40]

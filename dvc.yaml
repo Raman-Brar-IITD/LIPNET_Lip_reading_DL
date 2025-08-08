@@ -1,0 +1,34 @@
+stages:
+  download_data:
+    cmd: python src/download_data.py
+    params:
+    - data.url
+    - data.zip_file
+    - data.raw_dir
+    outs:
+    - data/raw/data.zip
+
+  preprocess:
+    cmd: python src/preprocess.py
+    deps:
+    - data/raw/data.zip
+    - src/preprocess.py
+    - src/utils.py
+    params:
+    - data.raw_dir
+    - data.zip_file
+    - data.tfrecord_file
+    outs:
+    - data/processed/lipread_data.tfrecord
+
+  train:
+    cmd: python src/train.py
+    deps:
+    - data/processed/lipread_data.tfrecord
+    - src/train.py
+    - src/utils.py
+    params:
+    - train
+    - model
+    outs:
+    - models/lipread_model.weights.h5
