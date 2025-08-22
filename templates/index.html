@@ -8,9 +8,21 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <style>
         body { font-family: 'Inter', sans-serif; }
+        .loader {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body class="bg-gray-100 text-gray-800 flex items-center justify-center min-h-screen p-4">
@@ -18,30 +30,21 @@
     <div class="w-full max-w-2xl bg-white rounded-xl shadow-lg p-8 md:p-12">
         <div class="text-center">
             <h1 class="text-3xl md:text-4xl font-bold text-gray-900">Lip Reading AI</h1>
-            <p class="mt-2 text-gray-600">Upload a video file to get the predicted transcription.</p>
+            <p class="mt-2 text-gray-600">Select a video, then click Transcribe to get the prediction.</p>
         </div>
 
         <div class="mt-8">
-            <form method="post" enctype="multipart/form-data" class="space-y-6">
+            <!-- The form no longer needs a method attribute -->
+            <form id="transcription-form" class="space-y-6">
                 <div>
-                    <label for="video-upload" class="block text-sm font-medium text-gray-700">Video File (.mpg, .mp4)</label>
-                    <div class="mt-2 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md">
-                        <div class="space-y-1 text-center">
-                            <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
-                                <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                            </svg>
-                            <div class="flex text-sm text-gray-600">
-                                <label for="video" class="relative cursor-pointer bg-white rounded-md font-medium text-indigo-600 hover:text-indigo-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-indigo-500">
-                                    <span>Upload a file</span>
-                                    <input id="video" name="video" type="file" class="sr-only" accept="video/mpg, video/mp4">
-                                </label>
-                                <p class="pl-1">or drag and drop</p>
-                            </div>
-                            <p class="text-xs text-gray-500">MPG or MP4 up to 50MB</p>
-                        </div>
-                    </div>
+                    <label for="video-selection" class="block text-sm font-medium text-gray-700">Select a Video</label>
+                    <select id="video-selection" name="video_selection" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                        <option value="">-- Please choose a video --</option>
+                        {% for video in video_files %}
+                            <option value="{{ video }}">{{ video }}</option>
+                        {% endfor %}
+                    </select>
                 </div>
-
                 <div>
                     <button type="submit" class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
                         Transcribe Video
@@ -50,34 +53,111 @@
             </form>
         </div>
 
-        {% if error %}
-            <div class="mt-8 p-4 bg-red-100 border border-red-400 text-red-700 rounded-md" role="alert">
-                <p class="font-bold">Error:</p>
-                <p>{{ error }}</p>
+        <!-- Dynamic content area -->
+        <div id="response-area" class="mt-10">
+            <!-- Loading indicator (initially hidden) -->
+            <div id="loading-indicator" style="display: none;" class="text-center">
+                <div class="loader"></div>
+                <p class="text-gray-600">Processing video, please wait...</p>
             </div>
-        {% endif %}
 
-        {% if prediction %}
-            <div class="mt-10">
-                <h2 class="text-2xl font-semibold text-center text-gray-800">Result</h2>
-                <div class="mt-4 space-y-4">
-                    {% if video_filename %}
-                        <div class="text-center">
-                            <video controls class="max-w-full mx-auto rounded-lg shadow-md">
-                                <source src="{{ url_for('uploaded_file', filename=video_filename) }}" type="video/mp4">
-                                <source src="{{ url_for('uploaded_file', filename=video_filename) }}" type="video/mpg">
-                                Your browser does not support the video tag.
-                            </video>
-                        </div>
-                    {% endif %}
-                    <div class="bg-gray-50 p-6 rounded-lg">
+            <!-- Error message container (initially hidden) -->
+            <div id="error-container" style="display: none;" class="p-4 bg-red-100 border border-red-400 text-red-700 rounded-md" role="alert">
+                <p class="font-bold">Error:</p>
+                <p id="error-message"></p>
+            </div>
+
+            <!-- Results container (initially hidden) -->
+            <div id="results-wrapper" style="display: none;">
+                <div id="video-container" class="text-center">
+                    <h2 class="text-2xl font-semibold text-gray-800 mb-4">Video Preview</h2>
+                    <video id="video-player" controls class="max-w-full mx-auto rounded-lg shadow-md" autoplay>
+                        <source id="video-source" src="" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>
+                </div>
+                <div id="result-container" class="mt-8">
+                    <h2 class="text-2xl font-semibold text-center text-gray-800">Result</h2>
+                    <div class="bg-gray-50 p-6 rounded-lg mt-4">
                         <p class="text-sm text-gray-500 font-medium">Predicted Text:</p>
-                        <p class="text-2xl font-mono text-center text-gray-900 tracking-wider p-4 bg-white rounded-md">{{ prediction if prediction else "[No text detected]" }}</p>
+                        <p id="prediction-text" class="text-2xl font-mono text-center text-gray-900 tracking-wider p-4 bg-white rounded-md"></p>
                     </div>
                 </div>
             </div>
-        {% endif %}
+        </div>
     </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const transcriptionForm = document.getElementById('transcription-form');
+            const videoSelection = document.getElementById('video-selection');
+            
+            const loadingIndicator = document.getElementById('loading-indicator');
+            const errorContainer = document.getElementById('error-container');
+            const errorMessage = document.getElementById('error-message');
+            const resultsWrapper = document.getElementById('results-wrapper');
+            
+            const videoPlayer = document.getElementById('video-player');
+            const videoSource = document.getElementById('video-source');
+            const predictionText = document.getElementById('prediction-text');
+
+            transcriptionForm.addEventListener('submit', function(event) {
+                // Prevent the default form submission (which causes a page reload)
+                event.preventDefault();
+
+                const selectedVideo = videoSelection.value;
+                if (!selectedVideo) {
+                    alert('Please select a video first.');
+                    return;
+                }
+
+                // --- UI UPDATES: Show loading, hide old results/errors ---
+                loadingIndicator.style.display = 'block';
+                resultsWrapper.style.display = 'none';
+                errorContainer.style.display = 'none';
+
+                // --- ASYNCHRONOUS REQUEST: Send data to the backend ---
+                fetch('/predict', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ video_filename: selectedVideo }),
+                })
+                .then(response => response.json())
+                .then(data => {
+                    // --- HIDE LOADING SPINNER ---
+                    loadingIndicator.style.display = 'none';
+
+                    if (data.error) {
+                        // --- HANDLE ERRORS from the backend ---
+                        errorMessage.textContent = data.error;
+                        errorContainer.style.display = 'block';
+                    } else {
+                        // --- SUCCESS: Update the page with new data ---
+                        predictionText.textContent = data.prediction || "[No text detected]";
+                        
+                        // Construct the new video URL with the cache buster
+                        const videoUrl = `{{ url_for('static', filename='converted_videos/') }}${data.video_to_play}?v=${data.cache_buster}`;
+                        
+                        // Update the video player source and force it to load
+                        videoSource.setAttribute('src', videoUrl);
+                        videoPlayer.load();
+                        
+                        // Show the results
+                        resultsWrapper.style.display = 'block';
+                    }
+                })
+                .catch(error => {
+                    // --- HANDLE NETWORK ERRORS ---
+                    loadingIndicator.style.display = 'none';
+                    errorMessage.textContent = 'A network error occurred. Please try again.';
+                    errorContainer.style.display = 'block';
+                    console.error('Fetch Error:', error);
+                });
+            });
+        });
+    </script>
 
 </body>
 </html>

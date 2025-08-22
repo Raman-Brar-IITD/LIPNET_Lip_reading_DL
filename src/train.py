@@ -10,7 +10,6 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import ModelCheckpoint, LearningRateScheduler
 from src.utils import VOCAB
 
-# --- VOCABULARY SETUP ---
 char_to_num = tf.keras.layers.StringLookup(vocabulary=VOCAB, oov_token="")
 
 def parse_tfrecord_fn(example):
@@ -49,11 +48,11 @@ def build_model(input_shape, vocab_size):
     ])
 
 def main():
-    # --- Load config ---
+
     with open('params.yaml') as f:
         params = yaml.safe_load(f)
 
-    # --- Parameters ---
+
     tfrecord_path = params['data']['tfrecord_file']
     train_params = params['train']
     model_params = params['model']
@@ -74,12 +73,11 @@ def main():
 
     os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
 
-    # --- GPU Memory Growth ---
     physical_devices = tf.config.list_physical_devices('GPU')
     if physical_devices:
         tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
-    # --- Dataset ---
+
     dataset = tf.data.TFRecordDataset(tfrecord_path)
     dataset = dataset.map(parse_tfrecord_fn, num_parallel_calls=tf.data.AUTOTUNE)
     dataset = dataset.cache().shuffle(buffer_size=1000)
@@ -93,13 +91,13 @@ def main():
     train_pipeline = train_data.padded_batch(batch_size, padded_shapes=padded_shapes).prefetch(tf.data.AUTOTUNE)
     test_pipeline = test_data.padded_batch(batch_size, padded_shapes=padded_shapes).prefetch(tf.data.AUTOTUNE)
 
-    # --- Build Model ---
+
     vocab_size = char_to_num.vocabulary_size()
     model = build_model(input_shape, vocab_size)
     model.compile(optimizer=Adam(learning_rate=learning_rate), loss=CTCLoss)
     model.summary()
 
-    # --- Callbacks ---
+
     checkpoint_callback = ModelCheckpoint(
         filepath=checkpoint_path,
         monitor='val_loss',
@@ -110,7 +108,7 @@ def main():
     )
     schedule_callback = LearningRateScheduler(scheduler)
 
-    # --- Load weights if they exist ---
+
     if os.path.exists(weight_local):
         print("Found local weights. Loading...")
         model.load_weights(weight_local)
@@ -125,7 +123,7 @@ def main():
             print("❌ Failed to download/load weights:", e)
             print("⚠️ Proceeding with random initialization.")
 
-    # --- Train ---
+
     if train_params.get("training", True):
         print("\n🚀 Starting model training...")
         model.fit(
@@ -138,12 +136,12 @@ def main():
     else:
         print("🚫 Training skipped as per configuration.")
 
-    # --- Save final weights ---
+
     final_weights_path = "models/lipread_model.weights.h5"
     model.save_weights(final_weights_path)
     print(f"✅ Final model weights saved to: {final_weights_path}")
 
-    # --- Evaluate ---
+
     test_loss = model.evaluate(test_pipeline)
     print(f"📊 Test loss: {test_loss:.4f}")
 

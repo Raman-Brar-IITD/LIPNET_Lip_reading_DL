@@ -1,123 +1,130 @@
 import os
-import cv2
-import yaml
-import base64
-import numpy as np
+import subprocess
+import time
 import tensorflow as tf
-from flask import Flask, render_template
-from flask_socketio import SocketIO, emit
+import yaml
+from flask import Flask, render_template, request, jsonify
 
 # Import functions and variables from your project's 'src' directory
+from src.predict import predict_video
 from src.train import build_model
-from src.predict import predict_frames
-from src.utils import VOCAB
+from src.utils import char_to_num
 
 # --- 1. INITIAL SETUP ---
 app = Flask(__name__)
-# A secret key is required by Flask-SocketIO for session management
-app.config['SECRET_KEY'] = 'your-very-secret-key'
-# Initialize SocketIO for real-time communication
-socketio = SocketIO(app)
+
+# --- Using the correct path you found via the 'where' command ---
+FFMPEG_PATH = r"C:\Users\Raman\AppData\Local\Microsoft\WinGet\Links\ffmpeg.exe"
+
 
 # --- 2. LOAD THE TRAINED MODEL (Done once at startup) ---
 print("Loading lip-reading model...")
 with open('params.yaml') as f:
     params = yaml.safe_load(f)
 
-# Get model and training parameters from params.yaml
+# Get model and training parameters
 model_params = params['model']
 train_params = params['train']
 input_shape = model_params['input_shape']
-vocab_size = len(VOCAB)
+vocab_size = len(char_to_num.get_vocabulary())
 model_weights_path = train_params['checkpoint_path']
 
-# Build the model architecture (reusing the function from train.py)
+# Build the model architecture
 model = build_model(input_shape, vocab_size)
 
-# Load the trained weights into the model structure
+# Load the trained weights
 if os.path.exists(model_weights_path):
     model.load_weights(model_weights_path)
     print(f"Model weights loaded successfully from {model_weights_path}.")
 else:
     print(f"WARNING: Model weights not found at {model_weights_path}. Predictions will be random.")
 
-# --- 3. FRAME BUFFER ---
-# This list will act as a temporary buffer to hold frames from the webcam stream
-frame_buffer = []
+# --- 3. VIDEO DATA DIRECTORIES ---
+ORIGINAL_VIDEO_DIR = os.path.join('data', 'raw', 'extracted_data', 'data', 's1')
+CONVERTED_VIDEO_DIR = 'static/converted_videos'
+os.makedirs(CONVERTED_VIDEO_DIR, exist_ok=True)
 
-# --- 4. FLASK & SOCKETIO ROUTES ---
+
+def get_original_video_files():
+    """Returns a sorted list of all .mpg files from the original dataset."""
+    if not os.path.exists(ORIGINAL_VIDEO_DIR):
+        print(f"WARNING: Original video directory not found at {ORIGINAL_VIDEO_DIR}.")
+        return []
+    return sorted([f for f in os.listdir(ORIGINAL_VIDEO_DIR) if f.endswith('.mpg')])
+
+# --- 4. VIDEO CONVERSION FUNCTION ---
+def convert_to_mp4_for_playback(original_video_path):
+    """
+    Converts the selected video to a temporary MP4 file for web playback.
+    This file is always named 'selected_video.mp4' and is overwritten each time.
+    Returns the path to the converted file.
+    """
+    output_path = os.path.join(CONVERTED_VIDEO_DIR, 'selected_video.mp4')
+    
+    print(f"Converting {os.path.basename(original_video_path)} for web playback...")
+    
+    cmd = [
+        FFMPEG_PATH, '-i', original_video_path, '-y',
+        '-vcodec', 'libx264', '-acodec', 'aac', output_path
+    ]
+    
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"Successfully created temporary playback file at {output_path}.")
+        return output_path
+        
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        print(f"ERROR: FFmpeg conversion failed. Error: {e}")
+        print(f"Attempted to use FFmpeg from: {FFMPEG_PATH}")
+        return None
+
+# --- 5. FLASK ROUTES ---
 @app.route('/')
 def index():
-    """Renders the main HTML page for the application."""
-    return render_template('index.html')
+    """Renders the main page with the list of original videos."""
+    return render_template('index.html', video_files=get_original_video_files())
 
-@socketio.on('connect')
-def handle_connect():
+@app.route('/predict', methods=['POST'])
+def predict():
     """
-    This function is called when a new client connects to the server.
-    It sends a confirmation message back to the client.
+    Handles the prediction logic. This is called by the JavaScript fetch API.
+    It converts the video, runs the prediction, and returns the result as JSON.
     """
-    print('Client connected')
-    emit('status', {'msg': 'Connected. You can start streaming.'})
+    data = request.get_json()
+    selected_video_filename = data.get('video_filename')
 
-@socketio.on('image')
-def handle_image(data_image):
-    """
-    This function receives and processes each video frame sent from the client.
-    """
-    global frame_buffer
-    
-    # Decode the base64 image data received from the browser
-    sbuf = base64.b64decode(data_image.split(',')[1])
-    nparr = np.frombuffer(sbuf, dtype=np.uint8)
-    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if not selected_video_filename:
+        return jsonify({'error': 'No video filename provided.'}), 400
 
-    # Preprocess the frame to match the format used during training
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) # Convert to grayscale
-    frame = frame[190:236, 80:220] # Crop to the mouth region
-    
-    # Add the processed frame to our buffer
-    frame_buffer.append(frame)
+    original_video_path = os.path.join(ORIGINAL_VIDEO_DIR, selected_video_filename)
 
-    # When the buffer reaches the required sequence length (75 frames),
-    # it's time to run a prediction.
-    if len(frame_buffer) == 75:
-        try:
-            # Convert the buffer to a NumPy array for the model
-            frames_to_predict = np.array(frame_buffer)
-            
-            # Normalize the frames just like in training
-            mean = np.mean(frames_to_predict)
-            std = np.std(frames_to_predict)
-            frames_to_predict = (frames_to_predict - mean) / std
-            
-            # Run the prediction
-            prediction = predict_frames(model, frames_to_predict)
-            
-            # Send the resulting text back to the client
-            emit('response', {'data': prediction})
-            
-        except Exception as e:
-            print(f"Error during prediction: {e}")
-            emit('response', {'data': '[Error]'})
-            
-        finally:
-            # Clear the buffer to start collecting the next 75-frame sequence
-            frame_buffer.clear()
+    if not os.path.exists(original_video_path):
+        return jsonify({'error': 'Video file not found.'}), 404
 
-@socketio.on('disconnect')
-def handle_disconnect():
-    """
-    This function is called when a client disconnects.
-    It clears the buffer to ensure a clean state for the next connection.
-    """
-    global frame_buffer
-    frame_buffer.clear()
-    print('Client disconnected')
+    # Convert the video to the temporary file
+    converted_video_path = convert_to_mp4_for_playback(original_video_path)
+    if not converted_video_path:
+        return jsonify({'error': 'Failed to convert video for playback.'}), 500
 
-# --- 5. START THE SERVER ---
+    try:
+        # Run prediction on the original video file
+        prediction_text = predict_video(model, original_video_path)
+        
+        # Create a cache buster using the current time
+        cache_buster = int(time.time())
+        
+        # Return the result as JSON
+        return jsonify({
+            'prediction': prediction_text,
+            'video_to_play': 'selected_video.mp4',
+            'cache_buster': cache_buster
+        })
+    except Exception as e:
+        print(f"Error during prediction: {e}")
+        return jsonify({'error': 'An error occurred during prediction.'}), 500
+
+
+# --- 6. START THE SERVER ---
 if __name__ == '__main__':
-    # Use socketio.run() to start the web server.
-    # 'eventlet' is a recommended server for production use with SocketIO.
-    print("Starting Flask-SocketIO server on http://127.0.0.1:5001")
-    socketio.run(app, host='0.0.0.0', port=5001, debug=True)
+    print(f"Starting Flask server on http://127.0.0.1:5001")
+    app.run(host='0.0.0.0', port=5001, debug=True)
