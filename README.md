@@ -159,6 +159,5 @@ This project is licensed under the MIT License. See the `LICENSE` file for more 
 
 ## 📞 Contact Info
 
-  * **LinkedIn:** [Your LinkedIn Profile](www.linkedin.com/in/raman-singh-brar)
-  * **Portfolio:** [Your Portfolio Website](https://raman-brar-iitd.github.io/Website/)
-  * **Email:** your-email@example.com
+  * **LinkedIn:** [Your LinkedIn Profile](https://www.google.com/search?q=www.linkedin.com/in/raman-singh-brar)
+  * **Portfolio:** [Your Portfolio Website](https://www.google.com/search?q=https://raman-brar-iitd.github.io/Website/)
